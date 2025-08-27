@@ -73,11 +73,11 @@ _sc_complete () {
     fi
   fi
 }
-_sc_innercolour () {
-  local regex="$1"
-  local colour="$2"
-  sed -E "s/(\x1B[[0-9\;]*m)([^\x1B]*)(${regex})/\1\2${colour}\3\1/g"
-}
+# _sc_innercolour () {
+#   local regex="$1"
+#   local colour="$2"
+#   sed -E "s/(\x1B[[0-9\;]*m)([^\x1B]*)(${regex})/\1\2${colour}\3\1/g"
+# }
 ## Let the syntax highlighting function be defined elsewhere if you like
 # if [[ ! $(declare -F highlight_bash_syntax) == highlight_bash_syntax ]]; then 
   highlight_bash_syntax () {
@@ -117,7 +117,8 @@ _sc_afterwrite () {
     echo -en "\e[$PROMPT2_ROW;$((${#NAKEDPROMPT2}+1))H"
   fi
   if [[ -n $autocomp ]]; then
-    echo -en "$(highlight_bash_syntax "${part1}$autocomp ${part2}" | _sc_innercolour "$autocomp" $'\e[90;2m' )\e[0K\e[0m\e8" 
+    # echo -en "$(highlight_bash_syntax "${part1}$autocomp ${part2}" | _sc_innercolour "$autocomp" $'\e[90;2m' )\e[0K\e[0m\e8" 
+    echo -en "$(highlight_bash_syntax "${part1}$autocomp ${part2}")\e[0K\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e8" 
   else
     echo -en "$(highlight_bash_syntax "${part1}${part2}")\e[0K\e[0m\e8" 
   fi
