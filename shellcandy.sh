@@ -29,7 +29,7 @@ common_prefix () {
 
 _getrow () {
   declare -n envglobal=$1
-  echo -en '\e[6n' 
+  echo -en '\e[?25l\e[6n' 
   local a b
   IFS= read -sn1 a
   IFS= read -sdR b
@@ -39,14 +39,16 @@ _getrow () {
     export envglobal="${b}"
   fi
   unset a b
+  echo -en '\e[?25h' 
 }
 _sc_nakedprompt () {
   export NAKEDPROMPT1="$(echo "${PS1@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:])"
   export NAKEDPROMPT2="$(echo "${PS2@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:])"
 }
 
-_sc_complete () {
+_sc_autocomplete () {
   [[ -f /etc/bash_completion ]] && source /etc/bash_completion
+  # [[ -f ~/.bashrc.d/completions.sh ]] && source ~/.bashrc.d/completions.sh
   COMP_LINE="$@"
   read -ra COMP_WORDS <<< "$COMP_LINE"
   COMP_CWORD=${#COMP_WORDS[@]}
@@ -54,30 +56,102 @@ _sc_complete () {
   COMP_POINT=${#COMP_LINE}
   local cmd="${COMP_WORDS[0]}"
   local cur="${COMP_WORDS[$COMP_CWORD]}"
-  complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
-  local completion_func
-  completion_func=$(complete -p "$cmd" 2>/dev/null | sed -n "s/.*-F \([^ ]*\).*/\1/p")
-  if [[ -n $completion_func && $(type -t "$completion_func") == "function" ]]; then
+  if (( COMP_CWORD == 0 )); then
+    COMPREPLY=( $(compgen -cafu -- "$cmd" | sort -u) )
+  else
     COMPREPLY=()
-    "$completion_func"
-    if (( ${#COMPREPLY[@]} == 0)); then
-      local suff=' '
-    elif (( ${#COMPREPLY[@]} == 1)); then
-      local s_word="${COMPREPLY[0]}"
-    else
-      local s_word="$(common_prefix "${COMPREPLY[@]}")…"
-    fi
-    local suff="${s_word#$cur}"
-    if [[ -n "${suff}" && "${suff}" != '…' ]]; then
-      echo "${suff}"
+    complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
+    local completion_func
+    read _ _ completion_func _ <<< $(complete -p "$cmd")
+    if [[ -n $completion_func && $(type -t "$completion_func") == "function" ]]; then
+      "$completion_func"
     fi
   fi
+  if (( ${#COMPREPLY[@]} == 0)); then
+    local suff=''
+  elif (( ${#COMPREPLY[@]} == 1)); then
+    local s_word="${COMPREPLY[0]}"
+  else
+    local s_word="$(common_prefix "${COMPREPLY[@]}")…"
+  fi
+  local suff="${s_word#$cur}"
+  if [[ -n "${suff}" && "${suff}" != '…' ]]; then
+    echo "${suff}"
+  fi
 }
-# _sc_innercolour () {
-#   local regex="$1"
-#   local colour="$2"
-#   sed -E "s/(\x1B[[0-9\;]*m)([^\x1B]*)(${regex})/\1\2${colour}\3\1/g"
+
+_sc_tabcomplete () {
+  [[ -f /etc/bash_completion ]] && source /etc/bash_completion
+  # [[ -f ~/.bashrc.d/completions.sh ]] && source ~/.bashrc.d/completions.sh
+  COMP_LINE="$@"
+  read -ra COMP_WORDS <<< "$COMP_LINE"
+  [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
+  COMP_CWORD=${#COMP_WORDS[@]}
+  ((COMP_CWORD--))
+  COMP_POINT=${#COMP_LINE}
+  local cmd="${COMP_WORDS[0]}"
+  local cur="${COMP_WORDS[$COMP_CWORD]}"
+  if (( COMP_CWORD == 0 )); then
+    COMPREPLY=( $(compgen -cafu -- "$cmd" | sort -u) )
+  else
+    COMPREPLY=()
+    complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
+    local completion_func
+    read _ _ completion_func _ <<< $(complete -p "$cmd")
+    if [[ -n $completion_func && $(type -t "$completion_func") == "function" ]]; then
+      "$completion_func"
+    fi
+  fi
+  for i in "${COMPREPLY[@]}"; do
+    echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
+  done | paste - - - - - | column -t -c $(($COLUMNS/6)) | head -n5
+}
+# function _sc_tabcom_erase () {
+#   echo -en "\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[6A"
 # }
+
+_sc_ls_colors () {
+  local whole_line="$@"
+  local -a words
+  read -ra words <<< "$whole_line"
+  for item in ${words[@]} ; do
+    if [[ -e $item || -h $item ]]; then
+      local itemtype=''
+      local sub=''
+      local colourcode=''
+      local stats=$(stat -c %A "$item" 2>/dev/null)
+      case "${stats}" in
+        p?????????  ) itemtype="pi" ;;
+        s?????????  ) itemtype="so" ;;
+        b?????????  ) itemtype="bd" ;;
+        c?????????  ) itemtype="cd" ;;
+        l?????????  ) [[ -e "${item}" ]] && itemtype="ln" || itemtype="or" ;;
+        ???S??????  ) itemtype="su" ;;
+        ??????S???  ) itemtype="sg" ;;
+        d???????wt  ) itemtype="tw" ;;
+        d????????t  ) itemtype="st" ;;
+        d???????w?  ) itemtype="ow" ;;
+        d?????????  ) itemtype="di" ;;
+        -????????x  ) itemtype="ex" ;;
+        -?????????  ) itemtype="*.${item##*.}" ;;
+        *   ) : ;;
+      esac
+      colourcode=":${LS_COLORS}"
+      colourcode="${colourcode##*:${itemtype}=}"
+      colourcode="${colourcode%%:*}"
+      if [[ -n $colourcode ]]; then
+        colourcode="\e[${colourcode}m"
+        sub="${colourcode}${item}\e[0m"
+        whole_line="${whole_line// $item / $sub }"
+        whole_line="${whole_line/#$item /$sub }"
+        whole_line="${whole_line/% $item/ $sub}"
+      fi
+    fi
+  done
+  echo -n "$whole_line"
+}
+
+
 ## Let the syntax highlighting function be defined elsewhere if you like
 # if [[ ! $(declare -F highlight_bash_syntax) == highlight_bash_syntax ]]; then 
   highlight_bash_syntax () {
@@ -87,41 +161,53 @@ _sc_complete () {
     local red=$'\e[31m'
     local dim=$'\e[90;2m'
     local def=$'\e[0m'
-    if [[ -p /dev/stdin ]]; then 
-      # IFS= read text
-      while IFS= read line; do
-        text="$text"$'\n'"$line"
-      done
-    else
-      text="${text}$@"
-    fi
-    echo -n "$text" | sed -E "
+    # echo -n "$@" | sed -E "
+    local line cmd
+    line="$@"
+    read cmd _ <<< "$line"
+
+# cmnds=( $(compgen -ca) )
+# IFS='|'; echo "${cmnds[*]}"
+
+    sed -E "
       s/\b(if|fi|then|else|elif|for|in|do|done|while|break|function|return|exit|case|esac)\b/${cya}\1${def}/g;
-      s/\b(echo|cat|ssh|cp|mv|cd|curl|ls|ln|ll|rm)\b/${wht}\1${def}/g;
+      s/^ *([A-Za-z0-9._-]+\s)/${wht}\1${def}/g;
       s/("'\$'"[A-Za-z0-9_]+)/${red}\1${def}/g;
       s/("'\$'"\{[^}]*\})/${red}\1${def}/g;
-      s/("'"'"|')/${yel}\1${def}/g"
+      s/("'"'"|')/${yel}\1${def}/g" <<< "$line"
   }
 # fi
 
 _sc_afterwrite () {
-  sleep 0.0001
-  part1="${READLINE_LINE:0:$READLINE_POINT}"
-  part2="${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}"
-  local autocomp="$(_sc_complete "$part1")"
+  local part1="${READLINE_LINE:0:$READLINE_POINT}"
+  local part2="${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}"
+  local autocomp="$(_sc_autocomplete "$part1")"
   part1="${part1//\\/\\\\}"
   part2="${part2//\\/\\\\}"
-  echo -en "\e7\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + 1))H"
+  part1="$(_sc_ls_colors "$part1")"
+  part2="$(_sc_ls_colors "$part2")"
+  # echo -en "\e7\e[?25l\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + 1))H\e[0K"
+  echo -en "\e7\e[?25l\e[$PROMPT1_ROW;1H${PS1@P}"
+  sleep 0.0001
   if (( PROMPT1_ROW != PROMPT2_ROW )); then
     # Making multiline migraines moot
-    echo -en "\e[$PROMPT2_ROW;$((${#NAKEDPROMPT2}+1))H"
+    # echo -en "\e[$PROMPT2_ROW;$((${#NAKEDPROMPT2}+1))H"
+    echo -en "\e[$PROMPT2_ROW;1H${PS2@P}"
   fi
-  if [[ -n $autocomp ]]; then
-    # echo -en "$(highlight_bash_syntax "${part1}$autocomp ${part2}" | _sc_innercolour "$autocomp" $'\e[90;2m' )\e[0K\e[0m\e8" 
-    echo -en "$(highlight_bash_syntax "${part1}$autocomp ${part2}")\e[0K\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e8" 
+  if [[ -z $autocomp || "$part2"* == "${autocomp%…}"* ]]; then
+    echo -en "$(highlight_bash_syntax "${part1}${part2}")\e[0K\e[0m\e[?25h\e8"
   else
-    echo -en "$(highlight_bash_syntax "${part1}${part2}")\e[0K\e[0m\e8" 
+    local x y
+    if (( PROMPT1_ROW == PROMPT2_ROW )); then
+      x=$PROMPT1_ROW
+      y=${#NAKEDPROMPT1}
+    else
+      x=$PROMPT2_ROW
+      y=${#NAKEDPROMPT2}
+    fi
+    echo -en "$(highlight_bash_syntax "${part1}${autocomp}${part2}")\e[0K\e[$x;$(($y + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e[?25h\e8" 
   fi
+  echo -en "\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[5A" # Clears the autocomp columns
 }
 _sc_overwrite () {
   _sc_afterwrite "$@" 2>/dev/null & disown
@@ -147,19 +233,38 @@ function _sc_key () {
   local key="$1"
   case "${key}" in
     "\t" )
-      : ## TODO: Handle tabs to make completion look better.
+      local tabcomp="$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")"
+      if [[ -n $tabcomp && ! "${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}" == "${tabcomp}"* ]]; then 
+        READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${tabcomp%…}${READLINE_LINE:$READLINE_POINT}"
+        ((READLINE_POINT += ${#tabcomp}))
+        (_sc_overwrite 2>/dev/null)
+      else
+        echo -en "\e7\e[1B\e[2K$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\eM\e8"
+      fi
     ;;
+    "\e[C" ) ((READLINE_POINT < ${#READLINE_LINE})) && ((READLINE_POINT++)) ;;&
+    "\e[D" ) ((READLINE_POINT > 0)) && ((READLINE_POINT--)) ;;&
+    "\e[H" ) READLINE_POINT=0 ;;&
+    "\e[F" ) READLINE_POINT=${#READLINE_LINE} ;;&
+    "\e["[CDFH] )
+      _getrow PROMPT2_ROW
+      # [[ -n "$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}" 2>/dev/null )" ]] && (_sc_overwrite 2>/dev/null)
+      (_sc_overwrite 2>/dev/null)
+     ;;
     "\C-y" )
       ### Debugging key
       _getrow PROMPT1_ROW
       _getrow PROMPT2_ROW
       (_sc_overwrite 2>/dev/null)
       bleat "
-      READLINE_LINE=$READLINE_LINE
-      READLINE_POINT=$READLINE_POINT
-      autocomp=$(_sc_complete "${READLINE_LINE:0:$READLINE_POINT}")
-      PROMPT1_ROW=$PROMPT1_ROW
-      PROMPT2_ROW=$PROMPT2_ROW"
+      READLINE_LINE=\"$READLINE_LINE\"
+      READLINE_POINT=\"$READLINE_POINT\"
+      autocomp=\"$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
+      PROMPT1_ROW=\"$PROMPT1_ROW\"
+      PROMPT2_ROW=\"$PROMPT2_ROW\"
+      part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
+      part2=\"${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}\"
+      "
     ;;
     "\C-l" )
       ### Clear screen
@@ -180,8 +285,8 @@ function _sc_key () {
 ######## INIT  ###############
 
 ## Command keys
-# CmdKeys=( '\C-y' '\C-l' '\t' )
-CmdKeys=( '\C-y' '\C-l' )
+CmdKeys=( '\C-y' '\C-l' '\e[C' '\e[D' '\e[F' '\e[H' '\t' )
+# CmdKeys=( '\C-y' '\C-l' '\e[C' '\e[D' '\e[F' '\e[H' )
 
 ## Text keys
 for char in {0..9} {a..z} {A..Z} ' ' {\!,\",\£,\$,%,^,\*,\(,\),-,=,_,+,[,],\{,\},\;,\',\#,:,@,\~,\,,.,/,\<,\>,\?,\|} "${CmdKeys[@]}"; do
@@ -229,10 +334,10 @@ trap resize SIGWINCH
 
 # _sc_afterwrite () {
 #   sleep 0.0001
-#   # autocomp="$(_sc_complete "$READLINE_LINE")"
+#   # autocomp="$(_sc_autocomplete "$READLINE_LINE")"
 #   part1="${READLINE_LINE:0:$READLINE_POINT}"
 #   part2="${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}"
-#   local autocomp="$(_sc_complete "$part1")"
+#   local autocomp="$(_sc_autocomplete "$part1")"
 #   local rlbuffer="${READLINE_LINE//\\/\\\\}"
 #   local ac_col
 #   # local rlbuffer="${READLINE_LINE}"
