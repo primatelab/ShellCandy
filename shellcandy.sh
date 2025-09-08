@@ -29,7 +29,7 @@ common_prefix () {
 
 _getrow () {
   declare -n envglobal=$1
-  echo -en '\e[?25l\e[6n' 
+  echo -en '\e[?25l\e[8m\e[6n' 
   local a b
   IFS= read -sn1 a
   IFS= read -sdR b
@@ -39,7 +39,7 @@ _getrow () {
     export envglobal="${b}"
   fi
   unset a b
-  echo -en '\e[?25h' 
+  echo -en '\e[?25h\e[28m'
 }
 _sc_nakedprompt () {
   export NAKEDPROMPT1="$(echo "${PS1@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:])"
@@ -51,6 +51,7 @@ _sc_autocomplete () {
   # [[ -f ~/.bashrc.d/completions.sh ]] && source ~/.bashrc.d/completions.sh
   COMP_LINE="$@"
   read -ra COMP_WORDS <<< "$COMP_LINE"
+  [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
   COMP_CWORD=${#COMP_WORDS[@]}
   ((COMP_CWORD--))
   COMP_POINT=${#COMP_LINE}
@@ -82,7 +83,6 @@ _sc_autocomplete () {
 
 _sc_tabcomplete () {
   [[ -f /etc/bash_completion ]] && source /etc/bash_completion
-  # [[ -f ~/.bashrc.d/completions.sh ]] && source ~/.bashrc.d/completions.sh
   COMP_LINE="$@"
   read -ra COMP_WORDS <<< "$COMP_LINE"
   [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
@@ -102,10 +102,19 @@ _sc_tabcomplete () {
       "$completion_func"
     fi
   fi
+  # if (("${#COMPREPLY[@]}" == 1)); then
+  #   i="${COMPREPLY[0]}"
+  #   echo "${i#$cur}"
+  # else
+  #   for i in "${COMPREPLY[@]}"; do
+  #     echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
+  #   done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n5
+  # fi
   for i in "${COMPREPLY[@]}"; do
     echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
-  done | paste - - - - - | column -t -c $(($COLUMNS/6)) | head -n5
+  done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n5
 }
+
 # function _sc_tabcom_erase () {
 #   echo -en "\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[6A"
 # }
@@ -233,13 +242,18 @@ function _sc_key () {
   local key="$1"
   case "${key}" in
     "\t" )
-      local tabcomp="$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")"
-      if [[ -n $tabcomp && ! "${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}" == "${tabcomp}"* ]]; then 
-        READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${tabcomp%…}${READLINE_LINE:$READLINE_POINT}"
-        ((READLINE_POINT += ${#tabcomp}))
+      local autocomp="$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")"
+      if [[ ! "${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}" == "${autocomp%…}"* ]]; then 
+        READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${autocomp%…}${READLINE_LINE:$READLINE_POINT}"
+        ((READLINE_POINT += ${#autocomp}))
         (_sc_overwrite 2>/dev/null)
       else
-        echo -en "\e7\e[1B\e[2K$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\eM\e8"
+        if [[ -z "$autocomp" ]]; then
+          echo -en "\e7\e[1B\e[2K$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\eM\e8"
+        else
+          ((READLINE_POINT += ${#autocomp}))
+          (_sc_overwrite 2>/dev/null)
+        fi
       fi
     ;;
     "\e[C" ) ((READLINE_POINT < ${#READLINE_LINE})) && ((READLINE_POINT++)) ;;&
@@ -260,6 +274,7 @@ function _sc_key () {
       READLINE_LINE=\"$READLINE_LINE\"
       READLINE_POINT=\"$READLINE_POINT\"
       autocomp=\"$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
+      tabcomp=\"$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
       PROMPT1_ROW=\"$PROMPT1_ROW\"
       PROMPT2_ROW=\"$PROMPT2_ROW\"
       part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
