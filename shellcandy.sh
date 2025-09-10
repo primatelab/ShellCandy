@@ -1,13 +1,13 @@
 #! /bin/bash
 
-## rlyeh
+
 
 if [[ "${BASH_SOURCE[0]}" = "${0}" ]]; then
   echo "Needs to be sourced."
   exit 1
 fi
 
-function bleat () {
+bleat () {
   echo "$@" > /tmp/baa
 }
 
@@ -62,10 +62,12 @@ _sc_autocomplete () {
   else
     COMPREPLY=()
     complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
-    local completion_func
-    read _ _ completion_func _ <<< $(complete -p "$cmd")
+    # read _ _ completion_func _ <<< $(complete -p "$cmd")
+    local completion_func="$(complete -p "$cmd")"
+    completion_func="${completion_func##* -F }"
+    completion_func="${completion_func%% *}"
     if [[ -n $completion_func && $(type -t "$completion_func") == "function" ]]; then
-      "$completion_func"
+      "$completion_func" &>/dev/null
     fi
   fi
   if (( ${#COMPREPLY[@]} == 0)); then
@@ -85,7 +87,7 @@ _sc_tabcomplete () {
   [[ -f /etc/bash_completion ]] && source /etc/bash_completion
   COMP_LINE="$@"
   read -ra COMP_WORDS <<< "$COMP_LINE"
-  [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
+  # [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
   COMP_CWORD=${#COMP_WORDS[@]}
   ((COMP_CWORD--))
   COMP_POINT=${#COMP_LINE}
@@ -97,22 +99,32 @@ _sc_tabcomplete () {
     COMPREPLY=()
     complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
     local completion_func
-    read _ _ completion_func _ <<< $(complete -p "$cmd")
+    # read _ _ completion_func _ <<< $(complete -p "$cmd")
+    local completion_func="$(complete -p "$cmd")"
+    completion_func="${completion_func##* -F }"
+    completion_func="${completion_func%% *}"
     if [[ -n $completion_func && $(type -t "$completion_func") == "function" ]]; then
-      "$completion_func"
+      "$completion_func" &>/dev/null
     fi
   fi
-  # if (("${#COMPREPLY[@]}" == 1)); then
-  #   i="${COMPREPLY[0]}"
-  #   echo "${i#$cur}"
-  # else
-  #   for i in "${COMPREPLY[@]}"; do
-  #     echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
-  #   done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n5
-  # fi
-  for i in "${COMPREPLY[@]}"; do
-    echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
-  done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n5
+  if (("${#COMPREPLY[@]}" > 1)); then
+    compcolumns="$(
+      for i in "${COMPREPLY[@]}"; do
+        echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
+      # done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n6)"
+      done | paste - - - - - | head -n6)"
+    _TabCompLines=$(echo "$compcolumns" | wc -l)
+    if (( _TabCompLines > 5 )); then
+      compcolumns="$(echo "$compcolumns" | head -n5)
+      \e[2;1m "$'\t'" "$'\t'" --more-- "$'\t'" "$'\t'" \e[0m"
+    fi
+    echo "$compcolumns"
+  else
+    _TabCompLines=0
+  fi | column -s$'\t' -t -c $(($COLUMNS/6))
+  # for i in "${COMPREPLY[@]}"; do
+  #   echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
+  # done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n5
 }
 
 # function _sc_tabcom_erase () {
@@ -195,6 +207,7 @@ _sc_afterwrite () {
   part2="${part2//\\/\\\\}"
   part1="$(_sc_ls_colors "$part1")"
   part2="$(_sc_ls_colors "$part2")"
+  local whole="$(_sc_ls_colors "${part1}${part2}")"
   # echo -en "\e7\e[?25l\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + 1))H\e[0K"
   echo -en "\e7\e[?25l\e[$PROMPT1_ROW;1H${PS1@P}"
   sleep 0.0001
@@ -204,7 +217,7 @@ _sc_afterwrite () {
     echo -en "\e[$PROMPT2_ROW;1H${PS2@P}"
   fi
   if [[ -z $autocomp || "$part2"* == "${autocomp%…}"* ]]; then
-    echo -en "$(highlight_bash_syntax "${part1}${part2}")\e[0K\e[0m\e[?25h\e8"
+    echo -en "$(highlight_bash_syntax "${whole}")\e[0K\e[0m\e[?25h\e8"
   else
     local x y
     if (( PROMPT1_ROW == PROMPT2_ROW )); then
@@ -216,7 +229,14 @@ _sc_afterwrite () {
     fi
     echo -en "$(highlight_bash_syntax "${part1}${autocomp}${part2}")\e[0K\e[$x;$(($y + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e[?25h\e8" 
   fi
-  echo -en "\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[5A" # Clears the autocomp columns
+  if (( TabCompLines > 0 )); then
+    echo -en "\e7"
+    for((i=0;i<TabCompLines;i++)); do
+      # echo -en "\e[1B\e[2K"
+      echo -en "\n\e[2K"
+    done
+    echo -en "\e[${TabCompLines}A\e8" # Clears the autocomp columns
+  fi
 }
 _sc_overwrite () {
   _sc_afterwrite "$@" 2>/dev/null & disown
@@ -227,32 +247,56 @@ _resize () {
   ## Handling terminal resize events
   local rll="$READLINE_LINE"
   local rlp="$READLINE_POINT"
-  _getrow PROMPT1_ROW &>/dev/null
+  # _getrow PROMPT1_ROW &>/dev/null
   _getrow PROMPT2_ROW &>/dev/null
   READLINE_LINE="$rll"
   READLINE_LINE="$rlp"
   _sc_overwrite 2>/dev/null
 }
-function resize () {
+resize () {
   _resize 2>/dev/null & disown
   wait -n
 }
 
-function _sc_key () {
+# getpos () {
+#   echo -en "\e[8m\e[6n" > /dev/tty
+#   IFS=R read -d R -r _pos < /dev/tty
+#   echo -en '\e[28m\r'
+#   rowcol="${_pos#*[}"
+#   row=${rowcol%;*}
+#   col=${rowcol#*;}
+#   echo $row $col > $tmpdir/rowcol
+# }
+
+_sc_key () {
   local key="$1"
+  # TabCompLines=0
   case "${key}" in
     "\t" )
-      local autocomp="$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")"
-      if [[ ! "${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}" == "${autocomp%…}"* ]]; then 
-        READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${autocomp%…}${READLINE_LINE:$READLINE_POINT}"
-        ((READLINE_POINT += ${#autocomp}))
-        (_sc_overwrite 2>/dev/null)
-      else
-        if [[ -z "$autocomp" ]]; then
-          echo -en "\e7\e[1B\e[2K$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\eM\e8"
-        else
+      if [[ -n "$READLINE_LINE" ]]; then
+        local autocomp="$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")"
+        if [[ ! "${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}" == "${autocomp%…}"* ]]; then 
+          READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${autocomp%…}${READLINE_LINE:$READLINE_POINT}"
           ((READLINE_POINT += ${#autocomp}))
           (_sc_overwrite 2>/dev/null)
+          TabCompLines=0
+        else
+          if [[ -z "$autocomp" ]]; then
+            # (_sc_overwrite 2>/dev/null)
+            local tabcomp="$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")"
+            if [[ -n $tabcomp ]]; then
+              TabCompLines=$(echo "$tabcomp" | wc -l)
+              # echo -en "\e7\e[1B\e[2K${tabcomp}\e[${TabCompLines}A\e8"
+              echo -en "\e[1B\e[2K${tabcomp}\e[${TabCompLines}A\r"
+            else
+              (_sc_overwrite 2>/dev/null)
+              TabCompLines=0
+            fi
+          else
+            ((READLINE_POINT += ${#autocomp}))
+            (_sc_overwrite 2>/dev/null)
+            TabCompLines=0
+          fi
         fi
       fi
     ;;
@@ -264,26 +308,33 @@ function _sc_key () {
       _getrow PROMPT2_ROW
       # [[ -n "$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}" 2>/dev/null )" ]] && (_sc_overwrite 2>/dev/null)
       (_sc_overwrite 2>/dev/null)
+      TabCompLines=0
      ;;
     "\C-y" )
       ### Debugging key
-      _getrow PROMPT1_ROW
-      _getrow PROMPT2_ROW
-      (_sc_overwrite 2>/dev/null)
+      # getpos
+      # _getrow PROMPT1_ROW
+      # _getrow PROMPT2_ROW
+      # autocomp=\"$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
+      # tabcomp=\"$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
       bleat "
       READLINE_LINE=\"$READLINE_LINE\"
       READLINE_POINT=\"$READLINE_POINT\"
-      autocomp=\"$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
-      tabcomp=\"$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
+      TabCompLines=\"$TabCompLines\"
+      LINES=\"$LINES\"
+      COLUMNS=\"$COLUMNS\"
+      _PS=\"$_PS\"
       PROMPT1_ROW=\"$PROMPT1_ROW\"
       PROMPT2_ROW=\"$PROMPT2_ROW\"
       part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
       part2=\"${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}\"
       "
+      # (_sc_overwrite 2>/dev/null)
     ;;
     "\C-l" )
       ### Clear screen
       clear
+      TabCompLines=0
       _getrow PROMPT1_ROW
     ;;
     [[:print:]] )
@@ -292,6 +343,7 @@ function _sc_key () {
       ((READLINE_POINT++))
       _getrow PROMPT2_ROW
       (_sc_overwrite 2>/dev/null)
+      TabCompLines=0
     ;;
     *) : ;;
   esac
@@ -301,7 +353,6 @@ function _sc_key () {
 
 ## Command keys
 CmdKeys=( '\C-y' '\C-l' '\e[C' '\e[D' '\e[F' '\e[H' '\t' )
-# CmdKeys=( '\C-y' '\C-l' '\e[C' '\e[D' '\e[F' '\e[H' )
 
 ## Text keys
 for char in {0..9} {a..z} {A..Z} ' ' {\!,\",\£,\$,%,^,\*,\(,\),-,=,_,+,[,],\{,\},\;,\',\#,:,@,\~,\,,.,/,\<,\>,\?,\|} "${CmdKeys[@]}"; do
@@ -312,11 +363,45 @@ done
 # bind '-x "\C-y": _sc_key "\C-y"'
 # bind '"\C-m": accept-line'
 
+unset char CmdKeys
+
 ## Finding the row
-PROMPT_COMMAND=( '_getrow PROMPT1_ROW' _sc_nakedprompt )
+PROMPT_COMMAND=( '_getrow PROMPT1_ROW' '_getrow PROMPT2_ROW' _sc_nakedprompt )
 
 trap resize SIGWINCH
 
+declare -i -g TabCompLines=0
+declare -g _PS
+PS2b="$PS2"
+PS2="\$(echo badger >> /tmp/baa)$PS2b"
+
+# ticker () {
+#   while :; do
+#     echo "-${READLINE_LINE}-" >> /tmp/baa
+#     sleep 1
+#   done
+# }
+
+# ticker & disown
+
+for i in "/run/user/$UID" "/dev/shm" "$HOME/.cache" "$HOME" "/tmp/"; do
+  if [[ -w "$i" && ! -e ${i}/$$ ]]; then
+    tmpdir="$i/.shellcandy.$$"
+    mkdir $tmpdir
+    break
+  fi
+done
+trap "rm -rf $tmpdir" EXIT
+
+function rndclr () {
+  local char CLR
+  for char in $(fold -w1 <<< $1); do
+    CLR=$(( ($RANDOM % 130) + 100))
+    echo -en "\e[38;5;${CLR}m${char}"
+  done
+}
+
+echo " 🍬 $(rndclr ShellCandy) 🍬"
 ############### Boneyard ######################
 
 ## In case I ever want to muck aroung with Enter (which I won't)
@@ -343,44 +428,3 @@ trap resize SIGWINCH
     #     (_sc_overwrite "$D_LINE" 2>/dev/null)
     #   fi
     # ;;
-
-
-
-
-# _sc_afterwrite () {
-#   sleep 0.0001
-#   # autocomp="$(_sc_autocomplete "$READLINE_LINE")"
-#   part1="${READLINE_LINE:0:$READLINE_POINT}"
-#   part2="${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}"
-#   local autocomp="$(_sc_autocomplete "$part1")"
-#   local rlbuffer="${READLINE_LINE//\\/\\\\}"
-#   local ac_col
-#   # local rlbuffer="${READLINE_LINE}"
-#   # local rlbuffer="${@//\\/\\\\}"
-#   # if [[ -n $autocomp ]]; then
-#   #   # local nakedprompt=$(echo "${PS1@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:] )
-#   #   ac_col=$(( ${#NAKEDPROMPT1} + $READLINE_POINT + 1))
-#   #   autocomp="$autocomp "
-#   # fi
-#   # echo -en "\e7\e[$PROMPT1_ROW;0H${PS1@P}"
-#   echo -en "\e7\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + 1))H"
-#   if (( PROMPT1_ROW != PROMPT2_ROW )); then
-#     # Making multiline Ctrl-M migraines moot
-#     # echo -en "\e[$PROMPT2_ROW;${#NAKEDPROMPT2}H${PS2@P}"
-#     echo -en "\e[$PROMPT2_ROW;$((${#NAKEDPROMPT2}+1))H"
-#   fi
-#   if [[ -n $autocomp ]]; then
-#     ac_col=$(( ${#NAKEDPROMPT2} + $READLINE_POINT + 1))
-#     echo -en "$(highlight_bash_syntax "${part1}$autocomp ${part2}" | _sc_innercolour "$autocomp" $'\e[90;2m' )\e[0K\e[0m\e8" 
-#   else
-#     echo -en "$(highlight_bash_syntax "${part1}${part2}")\e[0K\e[0m\e8" 
-#   fi
-#   # # # echo -en "${rlbuffer}\e[90;2m${autocomp}\e[0m\e[0K\e8"
-#   # # # echo -en "${rlbuffer}\e[0K\e[${ac_col}G${autocomp}\e[0m\e8"
-#   # # echo -en "$(highlight_bash_syntax "${rlbuffer}")\e[0K\e[${ac_col}G${autocomp}\e[0m\e8" 
-#   # echo -en "$(highlight_bash_syntax "${part1}")\e[0K\e[${ac_col}G${autocomp}\e[0m\e8" 
-# }
-# _sc_overwrite () {
-#   _sc_afterwrite "$@" 2>/dev/null & disown
-#   wait -n
-# }
