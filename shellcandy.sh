@@ -1,11 +1,44 @@
 #! /bin/bash
 
-
-
-if [[ "${BASH_SOURCE[0]}" = "${0}" ]]; then
-  echo "Needs to be sourced."
-  exit 1
+if [[ "${BASH_SOURCE[0]}" = "${0}" ]]; then 
+  rndclr () { echo -en "\e[38;5;$((($RANDOM % 130)+100))m"; }
+  echo
+  for char in 🍬 Ｓ ｈ ｅ ｌ ｌ Ｃ ａ ｎ ｄ ｙ 🍬 '\n\n' '~~~' Making '~' Bash '~' Sweeet '~~~'; do
+    echo -en "\e[1m$(rndclr)${char} "
+  done
+  echo -en "\e[0m"
+  echo -e "$(rndclr)\n"
+  read -sn1 -p "Would you like to install ShellCandy? [y/N]" ans
+  echo
+  if [[ ${ans,,} == y* ]]; then
+    echo -n "$(rndclr)"
+    read -ei "$HOME/.shellcandy" -p $'\e[1m'"Install location: "$'\e[0m' dest
+    # dest="$(realpath "$ans")"
+    if [[ -w "${dest%/*}" && ! -e "$dest" ]]; then
+      echo "$(rndclr)Installinating..."
+      cp "$0" "$dest"
+      chmod +x "$dest"
+      if ( ! grep -E "^\. (${dest/$HOME/\~}|${dest/$HOME/\~})" $HOME/.bashrc &>/dev/null) ; then
+        echo -e "\n. ${dest/$HOME/\~}" >> .bashrc
+      fi
+      echo "$(rndclr)Shell$(rndclr)Candy$(rndclr) is now installed."      
+    else
+      echo "$(rndclr)Couldn't install to $(rndclr)$dest"
+      exit 1
+    fi
+  fi
+  unset -f rndclr
+  exit
 fi
+
+for i in "/run/user/$UID" "/dev/shm" "$HOME/.shellcandy" "$HOME" "/tmp/"; do
+  if [[ -w "$i" && ! -e ${i}/$$ ]]; then
+    tmpdir="$i/.shellcandy.$$"
+    mkdir -p $tmpdir
+    break
+  fi
+done
+trap "rm -rf $tmpdir" EXIT
 
 bleat () {
   echo "$@" > /tmp/baa
@@ -27,28 +60,19 @@ common_prefix () {
   echo $prefix
 }
 
-_getrow () {
-  declare -n envglobal=$1
-  echo -en '\e[?25l\e[8m\e[6n' 
-  local a b
-  IFS= read -sn1 a
-  IFS= read -sdR b
-  if [[ ${a} == $'\e' ]]; then
-    b=${b#[}
-    b=${b%;*}
-    export envglobal="${b}"
-  fi
-  unset a b
-  echo -en '\e[?25h\e[28m'
+_sc_getpos () {
+  echo -en "\e[?25l\e[8m\e[6n" > /dev/tty
+  IFS=R read -d R -r pos < /dev/tty
+  echo -en '\e[?25h\e[28m\r'
+  pos="${pos#*[}"
+  pos="${pos%;*}"
+  echo $pos > $tmpdir/pos
 }
 _sc_nakedprompt () {
-  export NAKEDPROMPT1="$(echo "${PS1@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:])"
-  export NAKEDPROMPT2="$(echo "${PS2@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:])"
+  echo "${1@P}" | sed -r 's/\x1B\]0;.*\a//; s/\x1B\[[0-9;]*[A-Za-z]//g' | tr -d [:cntrl:]
 }
-
 _sc_autocomplete () {
   [[ -f /etc/bash_completion ]] && source /etc/bash_completion
-  # [[ -f ~/.bashrc.d/completions.sh ]] && source ~/.bashrc.d/completions.sh
   COMP_LINE="$@"
   read -ra COMP_WORDS <<< "$COMP_LINE"
   [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
@@ -62,7 +86,6 @@ _sc_autocomplete () {
   else
     COMPREPLY=()
     complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
-    # read _ _ completion_func _ <<< $(complete -p "$cmd")
     local completion_func="$(complete -p "$cmd")"
     completion_func="${completion_func##* -F }"
     completion_func="${completion_func%% *}"
@@ -87,7 +110,7 @@ _sc_tabcomplete () {
   [[ -f /etc/bash_completion ]] && source /etc/bash_completion
   COMP_LINE="$@"
   read -ra COMP_WORDS <<< "$COMP_LINE"
-  # [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
+  [[ $COMP_LINE == *" " ]] && COMP_WORDS+=("")
   COMP_CWORD=${#COMP_WORDS[@]}
   ((COMP_CWORD--))
   COMP_POINT=${#COMP_LINE}
@@ -99,7 +122,6 @@ _sc_tabcomplete () {
     COMPREPLY=()
     complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
     local completion_func
-    # read _ _ completion_func _ <<< $(complete -p "$cmd")
     local completion_func="$(complete -p "$cmd")"
     completion_func="${completion_func##* -F }"
     completion_func="${completion_func%% *}"
@@ -111,7 +133,6 @@ _sc_tabcomplete () {
     compcolumns="$(
       for i in "${COMPREPLY[@]}"; do
         echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
-      # done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n6)"
       done | paste - - - - - | head -n6)"
     _TabCompLines=$(echo "$compcolumns" | wc -l)
     if (( _TabCompLines > 5 )); then
@@ -122,14 +143,7 @@ _sc_tabcomplete () {
   else
     _TabCompLines=0
   fi | column -s$'\t' -t -c $(($COLUMNS/6))
-  # for i in "${COMPREPLY[@]}"; do
-  #   echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
-  # done | paste - - - - - | column -s$'\t' -t -c $(($COLUMNS/6)) | head -n5
 }
-
-# function _sc_tabcom_erase () {
-#   echo -en "\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[1B\e[2K\e[6A"
-# }
 
 _sc_ls_colors () {
   local whole_line="$@"
@@ -185,12 +199,10 @@ _sc_ls_colors () {
     # echo -n "$@" | sed -E "
     local line cmd
     line="$@"
-    read cmd _ <<< "$line"
-
-# cmnds=( $(compgen -ca) )
-# IFS='|'; echo "${cmnds[*]}"
-
+    read _cmd _ <<< "$line"
+    cmdrgx="$(compgen -ca | sort -u | grep "^${_cmd}$")"
     sed -E "
+      s/($cmdrgx)/${wht}\1${def}/
       s/\b(if|fi|then|else|elif|for|in|do|done|while|break|function|return|exit|case|esac)\b/${cya}\1${def}/g;
       s/^ *([A-Za-z0-9._-]+\s)/${wht}\1${def}/g;
       s/("'\$'"[A-Za-z0-9_]+)/${red}\1${def}/g;
@@ -203,31 +215,32 @@ _sc_afterwrite () {
   local part1="${READLINE_LINE:0:$READLINE_POINT}"
   local part2="${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}"
   local autocomp="$(_sc_autocomplete "$part1")"
+  local PS pos
+  read PS < $tmpdir/PS
+  read pos < $tmpdir/pos
   part1="${part1//\\/\\\\}"
   part2="${part2//\\/\\\\}"
   part1="$(_sc_ls_colors "$part1")"
   part2="$(_sc_ls_colors "$part2")"
   local whole="$(_sc_ls_colors "${part1}${part2}")"
-  # echo -en "\e7\e[?25l\e[$PROMPT1_ROW;$((${#NAKEDPROMPT1} + 1))H\e[0K"
-  echo -en "\e7\e[?25l\e[$PROMPT1_ROW;1H${PS1@P}"
+  echo -en "\e7\e[?25l\e[$pos;1H${PS1@P}"
   sleep 0.0001
-  if (( PROMPT1_ROW != PROMPT2_ROW )); then
+  if [[ $PS == "PS2" ]]; then
     # Making multiline migraines moot
-    # echo -en "\e[$PROMPT2_ROW;$((${#NAKEDPROMPT2}+1))H"
-    echo -en "\e[$PROMPT2_ROW;1H${PS2@P}"
+    echo -en "\e[$pos;1H${PS2b@P}"
   fi
   if [[ -z $autocomp || "$part2"* == "${autocomp%…}"* ]]; then
     echo -en "$(highlight_bash_syntax "${whole}")\e[0K\e[0m\e[?25h\e8"
   else
-    local x y
-    if (( PROMPT1_ROW == PROMPT2_ROW )); then
-      x=$PROMPT1_ROW
-      y=${#NAKEDPROMPT1}
+    # local rw cl
+    local cl
+    if [[ $PS == "PS1" ]]; then
+      NP="$(_sc_nakedprompt "$PS1")"
     else
-      x=$PROMPT2_ROW
-      y=${#NAKEDPROMPT2}
+      NP="$(_sc_nakedprompt "$PS2b")"
     fi
-    echo -en "$(highlight_bash_syntax "${part1}${autocomp}${part2}")\e[0K\e[$x;$(($y + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e[?25h\e8" 
+    # cl=${#NP}
+    echo -en "$(highlight_bash_syntax "${part1}${autocomp}${part2}")\e[0K\e[$pos;$(( ${#NP} + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e[?25h\e8" 
   fi
   if (( TabCompLines > 0 )); then
     echo -en "\e7"
@@ -243,34 +256,23 @@ _sc_overwrite () {
   wait -n
 }
 
-_resize () {
-  ## Handling terminal resize events
-  local rll="$READLINE_LINE"
-  local rlp="$READLINE_POINT"
-  # _getrow PROMPT1_ROW &>/dev/null
-  _getrow PROMPT2_ROW &>/dev/null
-  READLINE_LINE="$rll"
-  READLINE_LINE="$rlp"
-  _sc_overwrite 2>/dev/null
-}
-resize () {
-  _resize 2>/dev/null & disown
-  wait -n
-}
-
-# getpos () {
-#   echo -en "\e[8m\e[6n" > /dev/tty
-#   IFS=R read -d R -r _pos < /dev/tty
-#   echo -en '\e[28m\r'
-#   rowcol="${_pos#*[}"
-#   row=${rowcol%;*}
-#   col=${rowcol#*;}
-#   echo $row $col > $tmpdir/rowcol
+# _resize () {
+#   ## Handling terminal resize events
+#   local rll="$READLINE_LINE"
+#   local rlp="$READLINE_POINT"
+#   _sc_getpos &>/dev/null
+#   READLINE_LINE="$rll"
+#   READLINE_LINE="$rlp"
+#   (_sc_overwrite 2>/dev/null)
 # }
+# resize () {
+#   _resize 2>/dev/null & disown
+#   wait -n
+# }
+# trap resize SIGWINCH
 
 _sc_key () {
   local key="$1"
-  # TabCompLines=0
   case "${key}" in
     "\t" )
       if [[ -n "$READLINE_LINE" ]]; then
@@ -305,43 +307,38 @@ _sc_key () {
     "\e[H" ) READLINE_POINT=0 ;;&
     "\e[F" ) READLINE_POINT=${#READLINE_LINE} ;;&
     "\e["[CDFH] )
-      _getrow PROMPT2_ROW
-      # [[ -n "$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}" 2>/dev/null )" ]] && (_sc_overwrite 2>/dev/null)
+      _sc_getpos
       (_sc_overwrite 2>/dev/null)
       TabCompLines=0
      ;;
     "\C-y" )
       ### Debugging key
-      # getpos
-      # _getrow PROMPT1_ROW
-      # _getrow PROMPT2_ROW
-      # autocomp=\"$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
-      # tabcomp=\"$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")\"
       bleat "
+      tmpdir=\"$tmpdir\"
       READLINE_LINE=\"$READLINE_LINE\"
       READLINE_POINT=\"$READLINE_POINT\"
       TabCompLines=\"$TabCompLines\"
       LINES=\"$LINES\"
       COLUMNS=\"$COLUMNS\"
-      _PS=\"$_PS\"
       PROMPT1_ROW=\"$PROMPT1_ROW\"
       PROMPT2_ROW=\"$PROMPT2_ROW\"
       part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
       part2=\"${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}\"
+      pos=\"$(cat $tmpdir/pos)\"
+      PS=\"$(cat $tmpdir/PS)\"
       "
-      # (_sc_overwrite 2>/dev/null)
     ;;
     "\C-l" )
       ### Clear screen
       clear
       TabCompLines=0
-      _getrow PROMPT1_ROW
+      _sc_getpos
     ;;
     [[:print:]] )
       ### Self-insert
       READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${key}${READLINE_LINE:$READLINE_POINT}"
       ((READLINE_POINT++))
-      _getrow PROMPT2_ROW
+      _sc_getpos
       (_sc_overwrite 2>/dev/null)
       TabCompLines=0
     ;;
@@ -359,49 +356,21 @@ for char in {0..9} {a..z} {A..Z} ' ' {\!,\",\£,\$,%,^,\*,\(,\),-,=,_,+,[,],\{,\
   bind "-x \"${char}\": _sc_key \"${char}\""
 done
 
-## Testing keys
-# bind '-x "\C-y": _sc_key "\C-y"'
-# bind '"\C-m": accept-line'
-
 unset char CmdKeys
 
-## Finding the row
-PROMPT_COMMAND=( '_getrow PROMPT1_ROW' '_getrow PROMPT2_ROW' _sc_nakedprompt )
+## Testing keys
+# bind '"\C-m": accept-line'
 
-trap resize SIGWINCH
 
 declare -i -g TabCompLines=0
-declare -g _PS
+
+## Finding the row
+# PROMPT_COMMAND=( '_getrow PROMPT1_ROW' '_getrow PROMPT2_ROW' _sc_nakedprompt )
+PROMPT_COMMAND=( '_sc_getpos' "echo PS1 > $tmpdir/PS" )
 PS2b="$PS2"
-PS2="\$(echo badger >> /tmp/baa)$PS2b"
+PS2="\$(echo PS2 > $tmpdir/PS)$PS2b"
 
-# ticker () {
-#   while :; do
-#     echo "-${READLINE_LINE}-" >> /tmp/baa
-#     sleep 1
-#   done
-# }
 
-# ticker & disown
-
-for i in "/run/user/$UID" "/dev/shm" "$HOME/.cache" "$HOME" "/tmp/"; do
-  if [[ -w "$i" && ! -e ${i}/$$ ]]; then
-    tmpdir="$i/.shellcandy.$$"
-    mkdir $tmpdir
-    break
-  fi
-done
-trap "rm -rf $tmpdir" EXIT
-
-function rndclr () {
-  local char CLR
-  for char in $(fold -w1 <<< $1); do
-    CLR=$(( ($RANDOM % 130) + 100))
-    echo -en "\e[38;5;${CLR}m${char}"
-  done
-}
-
-echo " 🍬 $(rndclr ShellCandy) 🍬"
 ############### Boneyard ######################
 
 ## In case I ever want to muck aroung with Enter (which I won't)
@@ -418,7 +387,6 @@ echo " 🍬 $(rndclr ShellCandy) 🍬"
     #     echo -e "${PS1@P}$(highlight_bash_syntax "$READLINE_LINE")"
     #     READLINE_LINE=''
     #     READLINE_POINT=${#READLINE_LINE}
-    #     _getrow PROMPT1_ROW
     #     ## This seems to replicate it well
     #   else
     #     READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}"$'\n'"${READLINE_LINE:$READLINE_POINT}"
