@@ -302,12 +302,22 @@ _sc_key () {
         fi
       fi
     ;;
-    "\e[C" ) ((READLINE_POINT < ${#READLINE_LINE})) && ((READLINE_POINT++)) ;;&
-    "\e[D" ) ((READLINE_POINT > 0)) && ((READLINE_POINT--)) ;;&
+    "\e[C" ) 
+      if ((READLINE_POINT < ${#READLINE_LINE})); then
+        ((READLINE_POINT++))
+        (_sc_overwrite 2>/dev/null)
+      fi
+    ;;
+    "\e[D" ) 
+      if ((READLINE_POINT > 0)); then
+        ((READLINE_POINT--))
+        (_sc_overwrite 2>/dev/null)
+      fi
+    ;;
     "\e[H" ) READLINE_POINT=0 ;;&
     "\e[F" ) READLINE_POINT=${#READLINE_LINE} ;;&
-    "\e["[CDFH] )
-      _sc_getpos
+    "\e["[FH] )
+      # _sc_getpos
       (_sc_overwrite 2>/dev/null)
       TabCompLines=0
      ;;
