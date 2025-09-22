@@ -69,10 +69,10 @@ trap byebye EXIT
 ########### Look up the Backspace key
 ERASE="$(stty -a | grep -Po '(?<= erase = )[^;]*' | sed 's/\^/\\C-/')"
 
-########### Debugger
-bleat () {
-  echo "$@" > /tmp/baa
-}
+# ########### Debugger
+# bleat () {
+#   echo "$@" > /tmp/baa
+# }
 
 ########### Misc functions
 common_prefix () {
@@ -103,9 +103,52 @@ _sc_nakedprompt () {
 }
 
 ############## Completion
+_sc_bash_parse () {
+  local stack
+  local whole_line="$@"
+  for((i=0;i<${#whole_line};i++)); do
+    local chr=${whole_line:i:1}
+    [[ -z $stack ]] && stack='n'
+    case "${stack}" in
+      *n ) case $chr in
+          "'"   ) stack="${stack}s" ;;
+          '"'   ) stack="${stack}d" ;;
+          ')'   ) stack="${stack%n}" ;;
+          '$'   ) stack="${stack}a" ;;
+          *     )  ;;
+        esac ;;
+      *s ) case $chr in
+          "'"   ) stack="${stack%s}" ;;
+          *     ) : ;;
+        esac ;;
+      *d ) case $chr in
+          '"' ) stack="${stack%d}" ;;
+          '$' ) stack="${stack}a" ;;
+          *   ) : ;;
+        esac ;;
+      *a ) case $chr in
+          [0-9A-Za-z_] ) stack="${stack%a}v" ;;
+          '{'          ) stack="${stack%a}V" ;;
+          '('          ) stack="${stack%a}n";; #subshell
+          *            ) stack="${stack%a}" ;;
+        esac ;;
+      *v ) case $chr in
+          [0-9A-Za-z_] )  ;;
+          *            ) stack="${stack%v}";; #subshell
+        esac ;;
+      *V ) case $chr in
+          '}' ) stack="${stack%V}" ;;
+          *   ) : ;;
+        esac ;;
+    esac
+  done
+  echo "$stack" > $rtdir/stack
+}
 _sc_autocomplete () {
-  local stack="$(cat $rtdir/ModeStack)"
-  if [[ "$stack" == *n ]]; then # don't do completions in strings or variables
+  _sc_bash_parse "$@"
+  local stack="$(cat $rtdir/stack)"
+  # if [[ "$stack" == *n ]]; then 
+  if [[ "$stack" != *s && "$stack" != *d ]]; then # don't do completions in strings
     [[ -f /etc/bash_completion ]] && source /etc/bash_completion
     COMP_LINE="$@"
     read -ra COMP_WORDS <<< "$COMP_LINE"
@@ -144,8 +187,10 @@ _sc_autocomplete () {
   fi
 }
 _sc_tabcomplete () {
-  local stack="$(cat $rtdir/ModeStack)"
-  if [[ "$stack" == *n ]]; then 
+  _sc_bash_parse "$@"
+  local stack="$(cat $rtdir/stack)"
+  # if [[ "$stack" == *n ]]; then 
+  if [[ "$stack" != *s && "$stack" != *d ]]; then # don't do completions in strings
     [[ -f /etc/bash_completion ]] && source /etc/bash_completion
     COMP_LINE="$@"
     read -ra COMP_WORDS <<< "$COMP_LINE"
@@ -160,7 +205,6 @@ _sc_tabcomplete () {
     else
       COMPREPLY=()
       complete -p "$cmd" &>/dev/null || _completion_loader "$cmd" &>/dev/null
-      local completion_func
       local completion_func="$(complete -p "$cmd")"
       completion_func="${completion_func##* -F }"
       completion_func="${completion_func%% *}"
@@ -233,6 +277,7 @@ _sc_bash_quotes () {
   #--- colours
   declare -A MODE
   MODE[n]=$'\e[22;39m'
+  MODE[a]=$'\e'"[1;${COLOUR[operator]}m"
   MODE[s]=$'\e'"[1;${COLOUR[quote]}m"
   MODE[d]=$'\e'"[22;${COLOUR[quote]}m"
   MODE[V]=$'\e'"[${COLOUR[variable]}m"
@@ -251,7 +296,7 @@ _sc_bash_quotes () {
           "'"   ) stack="${stack}s"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           '"'   ) stack="${stack}d"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           ')'   ) stack="${stack%n}"; insrt="$b${chr}$B${MODE[${stack:(-1)}]}" ;;
-          '$'   ) stack="${stack}a"; insrt="${MODE[${stack:(-1)}]}" ;;
+          '$'   ) stack="${stack}a"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           [\*\|\<\>\[\]\&]     ) insrt="$p$chr$P" ;;
           *     ) insrt="$chr" ;;
         esac ;;
@@ -261,14 +306,14 @@ _sc_bash_quotes () {
         esac ;;
       *d ) case $chr in
           '"' ) stack="${stack%d}"; insrt="${chr}${MODE[${stack:(-1)}]}" ;;
-          '$' ) stack="${stack}a"; insrt="${MODE[${stack:(-1)}]}" ;;
+          '$' ) stack="${stack}a"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           *   ) insrt="${MODE[${stack:(-1)}]}$chr" ;;
         esac ;;
       *a ) case $chr in
-          [0-9A-Za-z_] ) stack="${stack%a}v"; insrt="${MODE[${stack:(-1)}]}\$${chr}" ;;
-          '{'          ) stack="${stack%a}V"; insrt="${MODE[${stack:(-1)}]}$b\$${chr}$B" ;;
-          '('          ) stack="${stack%a}n"; insrt="${MODE[${stack:(-1)}]}$b\$${chr}$B" ;; # subshell
-          *            ) stack="${stack%a}"; insrt="\$$chr" ;;
+          [0-9A-Za-z_] ) stack="${stack%a}v"; insrt="${MODE[${stack:(-1)}]}\e[1D\$${chr}" ;;
+          '{'          ) stack="${stack%a}V"; insrt="${MODE[${stack:(-1)}]}$b\e[1D\$${chr}$B" ;;
+          '('          ) stack="${stack%a}n"; insrt="${MODE[${stack:(-1)}]}$b\e[1D\$${chr}$B" ;; # subshell
+          *            ) stack="${stack%a}"; insrt="$chr" ;;
         esac ;;
       *v ) case $chr in
           [0-9A-Za-z_] ) insrt="${MODE[${stack:(-1)}]}${chr}" ;;
@@ -281,7 +326,7 @@ _sc_bash_quotes () {
         esac ;;
     esac
     out="${out}${insrt}"
-    (( i == READLINE_POINT )) && echo "$stack" > $rtdir/ModeStack
+    (( i == READLINE_POINT )) && echo "$stack" > $rtdir/stack
   done
   echo -en "$out"
 }
@@ -378,24 +423,24 @@ _sc_key () {
       # Left arrow, right arrow, home, end
       (_sc_overwrite 2>/dev/null)
       TabCompLines=0
-     ;;
-    "\C-y" )
-      ### Debugging key
-      bleat "
-      rtdir=\"$rtdir\"
-      READLINE_LINE=\"$READLINE_LINE\"
-      READLINE_POINT=\"$READLINE_POINT\"
-      TabCompLines=\"$TabCompLines\"
-      ModeStack=\"$(cat $rtdir/ModeStack)\"
-      LINES=\"$LINES\"
-      COLUMNS=\"$COLUMNS\"
-      PROMPT1_ROW=\"$PROMPT1_ROW\"
-      PROMPT2_ROW=\"$PROMPT2_ROW\"
-      part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
-      part2=\"${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}\"
-      pos=\"$(cat $rtdir/pos)\"
-      PS=\"$(cat $rtdir/PS)\"
-      "
+    #  ;;
+    # "\C-y" )
+    #   ### Debugging key
+    #   bleat "
+    #   rtdir=\"$rtdir\"
+    #   READLINE_LINE=\"$READLINE_LINE\"
+    #   READLINE_POINT=\"$READLINE_POINT\"
+    #   TabCompLines=\"$TabCompLines\"
+    #   stack=\"$(cat $rtdir/stack)\"
+    #   LINES=\"$LINES\"
+    #   COLUMNS=\"$COLUMNS\"
+    #   PROMPT1_ROW=\"$PROMPT1_ROW\"
+    #   PROMPT2_ROW=\"$PROMPT2_ROW\"
+    #   part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
+    #   part2=\"${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}\"
+    #   pos=\"$(cat $rtdir/pos)\"
+    #   PS=\"$(cat $rtdir/PS)\"
+    #   "
     ;;
     "\C-l" )
       ### Clear screen
@@ -444,9 +489,11 @@ unset char CmdKeys
 declare -i -g TabCompLines=0
 
 ################## Finding the row
-PROMPT_COMMAND=( '_sc_getpos' "echo PS1 > $rtdir/PS" '_sc_overwrite 2>/dev/null' )
+PROMPT_COMMAND=( '_sc_getpos' "echo PS1 > $rtdir/PS" "echo n > $rtdir/stack" '_sc_overwrite 2>/dev/null' )
 PS2b="$PS2"
 PS2="\$(echo PS2 > $rtdir/PS; _sc_getpos)$PS2b"
+
+
 
 ############### Boneyard ######################
 
@@ -488,3 +535,20 @@ PS2="\$(echo PS2 > $rtdir/PS; _sc_getpos)$PS2b"
 #   wait -n
 # }
 # trap resize SIGWINCH
+
+# error_handler() {
+#   local exit_code=$?
+#   local line_no=${BASH_LINENO[0]}
+#   local cmd="${BASH_COMMAND}"
+#   echo "❌ Error: Command '${cmd}' exited with code ${exit_code} at line ${line_no}" >/tmp/baa
+#   echo "   Stack trace:" >>/tmp/baa
+#   for (( i=${#FUNCNAME[@]}-1; i>=1; i-- )); do
+#     local func="${FUNCNAME[$i]}"
+#     local line="${BASH_LINENO[$((i-1))]}"
+#     local src="${BASH_SOURCE[$i]}"
+#     echo "     at ${func}() in ${src}:${line}" >>/tmp/baa
+#   done
+#   cat /tmp/baa >&2
+#   # byebye
+# }
+# trap error_handler ERR
