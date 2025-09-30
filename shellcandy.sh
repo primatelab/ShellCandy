@@ -5,8 +5,12 @@ declare -A COLOUR
 
 COLOUR[quote]="38;5;221"
 COLOUR[variable]="38;5;202"
+COLOUR[misc]="38;5;208"
+COLOUR[number]="38;5;153"
 COLOUR[operator]="38;5;213"
 COLOUR[keyword]="38;5;81"
+COLOUR[comp]="38;5;240"
+COLOUR[lightcomp]="38;5;250"
 
 ######################################
 
@@ -14,15 +18,15 @@ sttyb="$(stty -g)"
 if [[ "${BASH_SOURCE[0]}" = "${0}" ]]; then 
   rndclr () { echo -en "\e[38;5;$((($RANDOM % 130)+100))m"; }
   echo
+  for char in 🍬 Ｓ ｈ ｅ ｌ ｌ Ｃ ａ ｎ ｄ ｙ 🍬 '\n\n' '~' Making '~' Bash '~' Look '~' Sweeet '~'; do
+    echo -en "\e[1m$(rndclr)${char} "
+  done
+  echo
   case "${1,,}" in
     -i | --install )
-      for char in 🍬 Ｓ ｈ ｅ ｌ ｌ Ｃ ａ ｎ ｄ ｙ 🍬 '\n\n' '~' Making '~' Bash '~' Look '~' Sweeet '~'; do
-        echo -en "\e[1m$(rndclr)${char} "
-      done
       # echo -e "\n\e[0m"
       echo -en "\n\n$(rndclr)"
       read -ei "$HOME/.shellcandy" -p $'\e[1m'"Install location: "$'\e[0m' dest
-      # dest="$(realpath "$ans")"
       if [[ -w "${dest%/*}" && ! -e "$dest" ]]; then
         echo "$(rndclr)Installinating..."
         cp "$0" "$dest"
@@ -44,9 +48,9 @@ if [[ "${BASH_SOURCE[0]}" = "${0}" ]]; then
       done
     ;;
     *) 
-      echo -e "\e[1m Usage:\e[22m"
-      echo -e "  -i, --install : Install ShellCandy (Copy this file and source it in .bashrc)"
-      echo -e "  -t, --try     : Try ShellCandy now (Starts a new shell with this file sourced)\e[0m\n"
+      echo -e "\n\e[1;38;5;189m Usage:\e[22m"
+      echo -e "  -i, --install : Install ShellCandy \e[2m(Copy this file and source it in .bashrc)\e[22m"
+      echo -e "  -t, --try     : Try ShellCandy now \e[2m(Starts a new shell with this file sourced)\e[0m\n"
     ;;
   esac
   unset -f rndclr
@@ -68,11 +72,6 @@ trap byebye EXIT
 
 ########### Look up the Backspace key
 ERASE="$(stty -a | grep -Po '(?<= erase = )[^;]*' | sed 's/\^/\\C-/')"
-
-# ########### Debugger
-# bleat () {
-#   echo "$@" > /tmp/baa
-# }
 
 ########### Misc functions
 common_prefix () {
@@ -174,7 +173,7 @@ _sc_autocomplete () {
       local suff=''
     elif (( ${#COMPREPLY[@]} == 1)); then
       local s_word="${COMPREPLY[0]}"
-      if [[ -d "$s_word" ]]; then
+      if [[ -d "$s_word" && -z "$(type -t "$s_word")" ]]; then
         s_word="${s_word%/}/"
       fi
     else
@@ -213,18 +212,27 @@ _sc_tabcomplete () {
       fi
     fi
     if (("${#COMPREPLY[@]}" > 1)); then
+    longest=''
+    for i in "${COMPREPLY[@]}"; do
+      (( ${#i} > ${#longest} )) && longest=${i}
+    done
+    local outcols=$(( ($COLUMNS / ${#longest})-1 ))
+    for((i=0;i<${#COMPREPLY[@]};i++)); do
+      (( (i % outcols) == 0 )) && echo || echo -n "¬"
+      echo -n "${COMPREPLY[$i]}"
+    done | column -s¬ -t > $rtdir/comp
       compcolumns="$(
         for i in "${COMPREPLY[@]}"; do
-          echo -e "\e[2;1m${cur}\e[0m\e[1;90m${i#$cur}\e[0m"
+          echo -e "\e[1;${COLOUR[lightcomp]}m${cur}\e[0m\e[1;${COLOUR[comp]}m${i#$cur}\e[0m"
         done | paste - - - - - | head -n6)"
-      _TabCompLines=$(echo "$compcolumns" | wc -l)
-      if (( _TabCompLines > 5 )); then
+      TabCompLines=$(echo "$compcolumns" | wc -l)
+      if (( TabCompLines > 5 )); then
         compcolumns="$(echo "$compcolumns" | head -n5)
-        \e[2;1m "$'\t'" "$'\t'" --more-- "$'\t'" "$'\t'" \e[0m"
+        \e[1;${COLOUR[lightcomp]}m "$'\t'" "$'\t'" --more-- "$'\t'" "$'\t'" \e[0m"
       fi
       echo "$compcolumns"
     else
-      _TabCompLines=0
+      TabCompLines=0
     fi | column -s$'\t' -t -c $(($COLUMNS/6))
   fi
 }
@@ -262,14 +270,14 @@ _sc_ls_colors () {
       colourcode="${colourcode%%:*}"
       if [[ -n $colourcode ]]; then
         colourcode=$'\e'"[${colourcode}m"
-        sub="${colourcode}${item}\e[0m"
+        sub="${colourcode}${item}"$'\e[0m'
         whole_line="${whole_line// $item / $sub }"
         whole_line="${whole_line/#$item /$sub }"
         whole_line="${whole_line/% $item/ $sub}"
       fi
     fi
   done
-  echo -en "$whole_line"
+  echo -n "$whole_line"
 }
 _sc_bash_quotes () {
   local stack insrt out
@@ -287,12 +295,16 @@ _sc_bash_quotes () {
   local B=$'\e[22m'
   local p=$'\e'"[1;${COLOUR[operator]}m"
   local P=$'\e[22;39m'
+  local m=$'\e'"[1;${COLOUR[misc]}m"
+  local M=$'\e[22;39m'
+  local n=$'\e'"[1;${COLOUR[number]}m"
+  local N=$'\e[22;39m'
   for((i=0;i<${#whole_line};i++)); do
     local chr=${whole_line:i:1}
     [[ -z $stack ]] && stack='n'
+    (( i == READLINE_POINT )) && echo "$stack" > $rtdir/stack
     case "${stack}" in
       *n ) case $chr in
-          # "'"   ) stack="${stack}s"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           "'"   ) stack="${stack}s"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           '"'   ) stack="${stack}d"; insrt="${MODE[${stack:(-1)}]}${chr}" ;;
           ')'   ) stack="${stack%n}"; insrt="$b${chr}$B${MODE[${stack:(-1)}]}" ;;
@@ -310,30 +322,32 @@ _sc_bash_quotes () {
           *   ) insrt="${MODE[${stack:(-1)}]}$chr" ;;
         esac ;;
       *a ) case $chr in
-          [0-9A-Za-z_] ) stack="${stack%a}v"; insrt="${MODE[${stack:(-1)}]}\e[1D\$${chr}" ;;
-          '{'          ) stack="${stack%a}V"; insrt="${MODE[${stack:(-1)}]}$b\e[1D\$${chr}$B" ;;
-          '('          ) stack="${stack%a}n"; insrt="${MODE[${stack:(-1)}]}$b\e[1D\$${chr}$B" ;; # subshell
+          [0-9A-Za-z_*@#?\$\!-] ) stack="${stack%a}v"; insrt="${MODE[${stack:(-1)}]}"$'\e[1D$'"${chr}" ;;
+          '{'          ) stack="${stack%a}V"; insrt="${MODE[${stack:(-1)}]}$b"$'\e[1D$'"${chr}$B" ;;
+          "'"          ) stack="${stack%a}s"; insrt="${MODE[${stack:(-1)}]}$b"$'\e[1D$'"${chr}$B" ;;
+          '('          ) stack="${stack%a}n"; insrt="${MODE[${stack:(-1)}]}$b"$'\e[1D$'"${chr}$B" ;; # subshell
           *            ) stack="${stack%a}"; insrt="$chr" ;;
         esac ;;
       *v ) case $chr in
           [0-9A-Za-z_] ) insrt="${MODE[${stack:(-1)}]}${chr}" ;;
-          *            ) stack="${stack%v}"; insrt="${MODE[${stack:(-1)}]}"; ((i--)) ;; # subshell
+          *         ) stack="${stack%v}"; insrt="${MODE[${stack:(-1)}]}"; ((i--)) ;; # subshell
         esac ;;
       *V ) case $chr in
-          '}' ) stack="${stack%V}"; insrt="$b${chr}$B${MODE[${stack:(-1)}]}" ;;
-          [0-9A-Za-z_] ) insrt="${MODE[${stack:(-1)}]}$chr" ;;
+          '}' ) stack="${stack%V}"; insrt="$m${chr}$M${MODE[${stack:(-1)}]}" ;;
+          [A-Za-z_] ) insrt="${MODE[${stack:(-1)}]}$chr" ;;
+          [0-9]     ) insrt="${MODE[${stack:(-1)}]}$n${chr}$N" ;;
+          [\[|\]|\#|\%|\@|\,|\^]   ) insrt="$m$chr$M" ;;
           *   ) insrt="$b$chr$B" ;;
         esac ;;
     esac
     out="${out}${insrt}"
-    (( i == READLINE_POINT )) && echo "$stack" > $rtdir/stack
   done
-  echo -en "$out"
+  echo -n "$out"
 }
 _sc_bash_words () {
-  local b=$'\e[1m'
+  local b=$'\e'"[1m"
   local k=$'\e'"[1;${COLOUR[keyword]}m"
-  local r=$'\e[22;39m'
+  local r=$'\e'"[22;39m"
   local line cmd
   line="$@"
   read cmd _ <<< "$line"
@@ -345,6 +359,8 @@ _sc_bash_words () {
 highlight_bash_syntax () {
   _sc_bash_words "$(_sc_ls_colors "$(_sc_bash_quotes "$@")")"
 }
+
+
 
 ####################### Display
 _sc_afterwrite () {
@@ -358,50 +374,54 @@ _sc_afterwrite () {
     PS1 ) NP="$(_sc_nakedprompt "$PS1")" ;;
     PS2 ) NP="$(_sc_nakedprompt "$PS2b")" ;;
   esac
-  outout="\e[?25l\e7\e[$pos;$((${#NP}+1))H"
-  if [[ -z $autocomp || "$part2"* == "${autocomp%…}"* ]]; then
-    # local whole="$(highlight_bash_syntax "${part1}${part2}")"
-    outout="${outout}$(highlight_bash_syntax "${part1}${part2}")\e[0K\e[0m\e[?25h\e8"
+  outout=$'\e[?25l\e7\e'"[$pos;$((${#NP}+1))H"
+  # (( READLINE_POINT > 0 )) && outout=$'\e[?25l\e7\e'"[${READLINE_POINT}D" || outout=$'\e[?25l\e7'
+  # if [[ -z $autocomp || "$part2" == "${autocomp%…}"* ]]; then
+  if [[ -z $autocomp || "${part2%% *}" == "${autocomp%…}"* ]]; then
+    outout="${outout}$(highlight_bash_syntax "${part1}${part2}")"$'\e[0K\e[0m\e[?25h\e8'
   else
-    outout="${outout}$(highlight_bash_syntax "${part1}${autocomp}${part2}")\e[0K\e[$pos;$(( ${#NP} + $READLINE_POINT + 1))H\e[1;90m$autocomp\e[0m\e[?25h\e8" 
+    local p2w1="${part2%% *}"
+    autocomp="${autocomp%$p2w1}"
+    outout="${outout}$(highlight_bash_syntax "${part1}${autocomp}${part2}")"$'\e[0K\e'"[$pos;$(( ${#NP} + $READLINE_POINT + 1))H"$'\e'"[1;${COLOUR[comp]}m${autocomp}"$'\e[0m\e[?25h\e8'
   fi
-  echo -en "$outout"
+  echo -n "$outout"
   if [[ "$@" != *"nodel"* && $TabCompLines -gt 0 ]] ; then
-    echo -en "\e7"
+    echo -n $'\e7'
     for((i=0;i<TabCompLines;i++)); do
-      echo -en "\n\e[2K"
+      echo -n $'\n\e[2K'
     done
-    echo -en "\e[${TabCompLines}A\e8" # Clears the autocomp columns
+    echo -n $'\e'"[${TabCompLines}A"$'\e8' # Clears the autocomp columns
   fi
 }
 _sc_overwrite () {
-  if [[ ! -f "$rtdir/lock" ]]; then
-    touch "$rtdir/lock"
-    _sc_afterwrite "$@" 2>/dev/null & disown
-    wait -n
-    rm "$rtdir/lock"
-  fi
+  _sc_afterwrite "$@" 2>/dev/null & disown
 }
 
 ################# Input
 _sc_key () {
   local key="$1"
-  case "${key}" in
+  case "$key" in
     "\t" )
-      if [[ -n "$READLINE_LINE" ]]; then
-        local autocomp="$(_sc_autocomplete "${READLINE_LINE:0:$READLINE_POINT}")"
+      # if [[ -n "$READLINE_LINE" ]]; then
+      if (( READLINE_POINT > 0 )); then
+        local part1="${READLINE_LINE:0:$READLINE_POINT}"
+        local part2="${READLINE_LINE:$READLINE_POINT}"
+        local autocomp="$(_sc_autocomplete "${part1}")"
         autocomp="${autocomp// /\\\ }"
-        if [[ ! "${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}" == "${autocomp%…}"* ]]; then
-          READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${autocomp%…}${READLINE_LINE:$READLINE_POINT}"
+        if [[ ! "${part2}" == "${autocomp%…}"* ]]; then
+          local p2w1="${part2%% *}"
+          autocomp="${autocomp%$p2w1}"
+          READLINE_LINE="${part1}${autocomp%…}${part2}"
           ((READLINE_POINT += ${#autocomp}))
           (_sc_overwrite 2>/dev/null)
           TabCompLines=0
         else
           if [[ -z "$autocomp" ]]; then
-            local tabcomp="$(_sc_tabcomplete "${READLINE_LINE:0:$READLINE_POINT}")"
+            local tabcomp="$(_sc_tabcomplete "${part1}")"
             if [[ -n $tabcomp ]]; then
               TabCompLines=$(echo "$tabcomp" | wc -l)
-              echo -en "\e[1B\e[2K${tabcomp}\e[${TabCompLines}A\r"
+              echo -n $'\e[1B'"${tabcomp}"$'\e'"[${TabCompLines}A"
+              _sc_getpos
               (_sc_overwrite nodel 2>/dev/null)
             else
               (_sc_overwrite 2>/dev/null)
@@ -423,24 +443,7 @@ _sc_key () {
       # Left arrow, right arrow, home, end
       (_sc_overwrite 2>/dev/null)
       TabCompLines=0
-    #  ;;
-    # "\C-y" )
-    #   ### Debugging key
-    #   bleat "
-    #   rtdir=\"$rtdir\"
-    #   READLINE_LINE=\"$READLINE_LINE\"
-    #   READLINE_POINT=\"$READLINE_POINT\"
-    #   TabCompLines=\"$TabCompLines\"
-    #   stack=\"$(cat $rtdir/stack)\"
-    #   LINES=\"$LINES\"
-    #   COLUMNS=\"$COLUMNS\"
-    #   PROMPT1_ROW=\"$PROMPT1_ROW\"
-    #   PROMPT2_ROW=\"$PROMPT2_ROW\"
-    #   part1=\"${READLINE_LINE:0:$READLINE_POINT}\"
-    #   part2=\"${READLINE_LINE:$READLINE_POINT:${#READLINE_LINE}}\"
-    #   pos=\"$(cat $rtdir/pos)\"
-    #   PS=\"$(cat $rtdir/PS)\"
-    #   "
+      return
     ;;
     "\C-l" )
       ### Clear screen
@@ -461,14 +464,13 @@ _sc_key () {
         (_sc_overwrite nocomp 2>/dev/null)
       fi
     ;;
-    [[:print:]] )
+    * )
       ### Self-insert
       READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${key}${READLINE_LINE:$READLINE_POINT}"
       ((READLINE_POINT++))
       (_sc_overwrite 2>/dev/null)
       TabCompLines=0
     ;;
-    *) : ;;
   esac
 }
 
@@ -492,63 +494,3 @@ declare -i -g TabCompLines=0
 PROMPT_COMMAND=( '_sc_getpos' "echo PS1 > $rtdir/PS" "echo n > $rtdir/stack" '_sc_overwrite 2>/dev/null' )
 PS2b="$PS2"
 PS2="\$(echo PS2 > $rtdir/PS; _sc_getpos)$PS2b"
-
-
-
-############### Boneyard ######################
-
-## In case I ever want to muck aroung with Enter (which I won't)
-    # "\C-m" )
-    #   ### ENTER
-    #   if bash -n <<<"$READLINE_LINE" 2>/dev/null; then
-    #     # bind '"\C-m": accept-line'
-    #     # READLINE_POINT=${#READLINE_LINE}
-    #     # return 1
-    #     echo "${READLINE_LINE@A}" >> /tmp/blarg
-    #     history -s "$READLINE_LINE"
-    #     # echo -e "${PS1@P}$READLINE_LINE"
-    #     eval "$READLINE_LINE"
-    #     echo -e "${PS1@P}$(highlight_bash_syntax "$READLINE_LINE")"
-    #     READLINE_LINE=''
-    #     READLINE_POINT=${#READLINE_LINE}
-    #     ## This seems to replicate it well
-    #   else
-    #     READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}"$'\n'"${READLINE_LINE:$READLINE_POINT}"
-    #     ((READLINE_POINT++))
-    #     # D_LINE="$READLINE_LINE"   # undecorated
-    #     D_LINE="$(highlight_bash_syntax "$READLINE_LINE")"
-    #     (_sc_overwrite "$D_LINE" 2>/dev/null)
-    #   fi
-    # ;;
-
-# _resize () {
-#   ## Handling terminal resize events
-#   local rll="$READLINE_LINE"
-#   local rlp="$READLINE_POINT"
-#   _sc_getpos &>/dev/null
-#   READLINE_LINE="$rll"
-#   READLINE_LINE="$rlp"
-#   (_sc_overwrite 2>/dev/null)
-# }
-# resize () {
-#   _resize 2>/dev/null & disown
-#   wait -n
-# }
-# trap resize SIGWINCH
-
-# error_handler() {
-#   local exit_code=$?
-#   local line_no=${BASH_LINENO[0]}
-#   local cmd="${BASH_COMMAND}"
-#   echo "❌ Error: Command '${cmd}' exited with code ${exit_code} at line ${line_no}" >/tmp/baa
-#   echo "   Stack trace:" >>/tmp/baa
-#   for (( i=${#FUNCNAME[@]}-1; i>=1; i-- )); do
-#     local func="${FUNCNAME[$i]}"
-#     local line="${BASH_LINENO[$((i-1))]}"
-#     local src="${BASH_SOURCE[$i]}"
-#     echo "     at ${func}() in ${src}:${line}" >>/tmp/baa
-#   done
-#   cat /tmp/baa >&2
-#   # byebye
-# }
-# trap error_handler ERR
