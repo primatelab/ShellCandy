@@ -1,4 +1,4 @@
-<img width="705" height="127" alt="ShellCandy" src="https://github.com/user-attachments/assets/8d1c8afb-b7dd-4426-a905-9b75f1095c04" />
+<img width="705" height="127" alt="ShellCandy" src="https://github.com/user-attachments/assets/790673fe-f38c-4316-823f-2e5104e02a8c" />
 
 # ShellCandy
 ### ~ _Making_ ~ _Bash_ ~ _look_ ~ _Sweeet_ ~
