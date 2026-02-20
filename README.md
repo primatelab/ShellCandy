@@ -5,7 +5,7 @@
 
 ShellCandy is a small set of shell functions and keybindings for your bash environment to add FISH-style syntax highlighting and autocompletion.
 
-> Cool gif will go here
+![shellcandy-gd](https://github.com/user-attachments/assets/cac4d459-1f46-47fd-9c10-d5ff76be8636)
 
 
 ## What ShellCandy is:
