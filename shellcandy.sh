@@ -91,6 +91,21 @@ common_prefix () {
   done
   echo $prefix
 }
+_sc_idletime () {
+  local return_code=0
+  [[ -z $_sc_TimeCheck ]] && _sc_TimeCheck=$(date +%s)
+  local diff=$(( $(date +%s) - $_sc_TimeCheck ))
+  if (( $# == 0 )); then
+    echo "$diff"
+    _sc_TimeCheck=$(date +%s)
+  elif (( $diff < $1 )); then
+    return_code=1
+  else
+    _sc_TimeCheck=$(date +%s)
+  fi
+  return $return_code
+}
+
 ################# Location and Prompt functions
 _sc_themecolour () {
   COLOUR[def]=$(echo $PS1 | grep -o '\[[0-9;]*m' | grep -o '[0-9;]*' | tail -n1)
@@ -172,7 +187,8 @@ _sc_bash_parse () {
   echo "$stack" "$out"
 }
 _sc_autocomplete () {
-  local arr=( $(_sc_bash_parse "$@") )
+  [[ "${1:(-1):1}" == ' ' ]] && return
+  local arr=( $(_sc_bash_parse "$1") )
   local stack="${arr[0]}"
   unset arr[0]
   local cmdline="${arr[@]}"
@@ -198,10 +214,10 @@ _sc_autocomplete () {
         "$completion_func" &>/dev/null
       fi
     fi
-    COMPREPLY=( ${COMPREPLY[@]/_sc_*/} ) ## Hide ShellCandy internals
-    if (( ${#COMPREPLY[@]} == 0)); then
+    COMPREPLY=( "${COMPREPLY[@]/_sc_*/}" ) ## Hide ShellCandy internals
+    if (( "${#COMPREPLY[@]}" == 0)); then
       local suff=''
-    elif (( ${#COMPREPLY[@]} == 1)); then
+    elif (( "${#COMPREPLY[@]}" == 1)); then
       local s_word="${COMPREPLY[0]}"
       if [[ -d "$s_word" && -z "$(type -t "$s_word")" ]]; then
         s_word="${s_word%/}/"
@@ -216,7 +232,8 @@ _sc_autocomplete () {
   fi
 }
 _sc_tabcomplete () {                    # stdout is the prefix, $_sc_rtdir/comp is the output
-  local arr=( $(_sc_bash_parse "$@") )
+  [[ "${1:(-1):1}" == ' ' ]] && return
+  local arr=( $(_sc_bash_parse "$1") )
   local stack="${arr[0]}"
   unset arr[0]
   local cmdline="${arr[@]}"
@@ -242,7 +259,7 @@ _sc_tabcomplete () {                    # stdout is the prefix, $_sc_rtdir/comp 
         "$completion_func" &>/dev/null
       fi
     fi
-    COMPREPLY=( ${COMPREPLY[@]/_sc_*/} ) ## Hide ShellCandy internals
+    COMPREPLY=( "${COMPREPLY[@]/_sc_*/}" ) ## Hide ShellCandy internals
     if (("${#COMPREPLY[@]}" > 1)); then
       echo "$cur" #> $_sc_rtdir/comp
       IFSb="$IFS"
@@ -415,7 +432,7 @@ _sc_afterwrite () {
     PS1 ) NP="$(_sc_nakedprompt "$PS1")" ;;
     PS2 ) NP="$(_sc_nakedprompt "$PS2b")" ;;
   esac
-  outout=$'\e[?25l\e7\e'"[$pos;$((${#NP}+1))H"
+  outout=$'\e7\e'"[$pos;$((${#NP}+1))H"
   if [[ -z $autocomp || "${part2%% *}" == "${autocomp%…}"* ]]; then
     outout="${outout}$(highlight_bash_syntax "${part1}${part2}")"$'\e[0K\e'"[${COLOUR[def]}m"$'\e[?25h\e8'
   else
@@ -448,7 +465,7 @@ _sc_underprint () {  #stdin is the list, $1 is the term to highlight
       break
     fi
   done
-  pfx="$(sed -E 's/\$/\\$/g; s/\{/\\{/g' <<< "$pfx"})"
+  # pfx="$(sed -E 's/\$/\\$/g; s/\{/\\{/g' <<< "$pfx"})"
   echo " ${allwords[@]:0:$i}" | column -c $cl | sed -E "s|(\s)${pfx}|$e[1;${COLOUR[lightcomp]}m\1$pfx$e[1;${COLOUR[comp]}m|g"
 }
 
@@ -496,20 +513,28 @@ _sc_key () {
     "\e[C" ) ((READLINE_POINT < ${#READLINE_LINE})) && ((READLINE_POINT++)) ;;&
     "\e[D" ) ((READLINE_POINT > 0)) && ((READLINE_POINT--)) ;;&
     "\e[A" )
-      ((_sc_HistBack<HISTCMD?_sc_HistBack++:_sc_HistBack))
+      # up arrow
+      ((_sc_HistBack==0)) && _sc_HistBuff="$READLINE_LINE"
+      ((_sc_HistBack<HISTCMD)) && _sc_HistBack=$((_sc_HistBack+1))
     ;;& 
     "\e[B" )
-      ((_sc_HistBack>0?_sc_HistBack--:_sc_HistBack))
+      # down arrow
+      ((_sc_HistBack>0)) && _sc_HistBack=$((_sc_HistBack-1))
     ;;& 
     "\e["[AB] )
-      # up arrow, down arrow
-      local HistLine=$(HISTTIMEFORMAT= builtin history | grep "^ *$((HISTCMD-_sc_HistBack))" )
-      READLINE_LINE="${HistLine##+( )+([0-9])+( )}"
+      # up and down arrows
+      if ((_sc_HistBack==0)); then
+        READLINE_LINE="$_sc_HistBuff"
+      else
+        local HistLine=$(HISTTIMEFORMAT= builtin history | grep "^ *$((HISTCMD-_sc_HistBack))" )
+        READLINE_LINE="${HistLine##+( )+([0-9])+( )}"
+      fi
      ;;&
     "\e[H" ) READLINE_POINT=0 ;;&
     "\e["[FAB] ) READLINE_POINT=${#READLINE_LINE} ;;&
     "\e["[ABCDFH] )
       # Left arrow, right arrow, up arrow, down arrow, home, end
+      _sc_getpos
       (_sc_overwrite 2>/dev/null)
       _sc_TabCompLines=0
      ;;
@@ -526,21 +551,24 @@ _sc_key () {
     ;;
     "\e[3~" ) 
       READLINE_LINE=${READLINE_LINE:0:READLINE_POINT}${READLINE_LINE:READLINE_POINT+1} # Delete
+      # (_sc_overwrite nocomp 2>/dev/null)
+      (_sc_overwrite 2>/dev/null)
       _sc_TabCompLines=0
-      (_sc_overwrite nocomp 2>/dev/null)
     ;;
     "$_sc_ERASE" )
       if ((READLINE_POINT > 0)); then
         READLINE_LINE=${READLINE_LINE:0:READLINE_POINT-1}${READLINE_LINE:READLINE_POINT} # Backspace
         ((READLINE_POINT--))
+        # (_sc_overwrite nocomp 2>/dev/null)
+        (_sc_overwrite 2>/dev/null)
         _sc_TabCompLines=0
-        (_sc_overwrite nocomp 2>/dev/null)
       fi
     ;;
     * )
       ### Self-insert
       READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}${key}${READLINE_LINE:$READLINE_POINT}"
       ((READLINE_POINT++))
+      _sc_idletime 5 && _sc_getpos
       (_sc_overwrite 2>/dev/null)
       _sc_TabCompLines=0
     ;;
@@ -567,6 +595,8 @@ COLOUR[def]="0" # default colour, determined by the PS1
 declare -i -g _sc_TabCompLines=0
 declare -i -g _sc_TabTaps=0
 declare -i -g _sc_HistBack=0
+declare -i -g _sc_TimeCheck=0
+declare -g _sc_HistBuff=''
 unset char CmdKeys
 
 ################## Finding the row, etc
